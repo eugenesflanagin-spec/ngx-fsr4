@@ -100,6 +100,19 @@ cmd_enable() {
 
     local d f
     while IFS= read -r -d '' d; do
+        # the NGX loader in DLSS games also looks for nvngx.dll beside the game
+        # (signature-checked; the override below lets ours through)
+        if [ -f "$d/nvngx_dlss.dll" ] || [ -f "$d/sl.interposer.dll" ]; then
+            f="$d/nvngx.dll"
+            if [ -e "$f" ]; then
+                n=$((n + 1))
+                cp -a "$f" "$bk/files/$n"
+                printf 'replaced\t%s\t%s\t%s\n' "$f" "$bk/files/$n" "$(sha "$f")" >>"$man"
+            else
+                printf 'added\t%s\t-\t-\n' "$f" >>"$man"
+            fi
+            cp "$LIB/nvngx.dll" "$f"
+        fi
         if [ $spoof = 1 ]; then
             # keep OptiScaler, but stop it answering DLSS itself
             f="$d/OptiScaler.ini"
@@ -240,6 +253,8 @@ cmd_run() {
     export DXVK_NVAPI_DRIVER_VERSION=${DXVK_NVAPI_DRIVER_VERSION:-58000}
     export DXVK_CONFIG="dxgi.hideAmdGpu=True${DXVK_CONFIG:+;$DXVK_CONFIG}"
     export PROTON_LOG=${PROTON_LOG:-1}
+    # the game folder may hold another FSR build (OptiScaler's); use ours
+    export NGX_FSR4_FFX_DLL=${NGX_FSR4_FFX_DLL:-'C:\windows\system32\amd_fidelityfx_upscaler_dx12.dll'}
     cd "$(dirname "$exe")"
     exec python3 "$proton/proton" waitforexitandrun "$exe"
 }
