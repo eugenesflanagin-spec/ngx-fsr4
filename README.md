@@ -80,7 +80,8 @@ ngx-fsr4 disable APPID    # put everything back
 
 `enable` makes three kinds of change:
 
-- copies the DLL into the game's Proton prefix as `system32/_nvngx.dll`;
+- copies the DLL into the game's Proton prefix as `system32/_nvngx.dll`, and beside the
+  game as `nvngx.dll` (the NGX loader checks there first);
 - copies the FSR runtime beside it;
 - sets `EnableSignatureOverride=1` under `NGXCore` in the prefix registry.
   NVIDIA's loader otherwise ignores an unsigned `_nvngx.dll`. This is the
