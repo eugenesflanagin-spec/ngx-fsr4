@@ -150,7 +150,7 @@ open(path, "w", encoding="utf-8", errors="surrogateescape").write(text)
 PY
     say "enabled for $NAME"
     sed -n 's/^\(added\|replaced\|moved\)\t\([^\t]*\).*/  \1  \2/p' "$man"
-    [ $spoof = 1 ] && say "OptiScaler kept for spoofing (EnableDlssInputs=false); launch from Steam as usual"
+    [ $spoof = 1 ] && say "OptiScaler kept for spoofing (EnableDlssInputs=false); launch with: ngx-fsr4 run $id"
     say "backup: $bk"
     say "undo:   ngx-fsr4 disable $id"
 }
@@ -223,6 +223,13 @@ cmd_run() {
     fi
     [ -f "$exe" ] || die "no game .exe found; pass --exe PATH"
     pgrep -x steam >/dev/null || say "warning: Steam is not running; Steam games usually need it"
+    # launchers such as GOverlay's bgmod rewrite OptiScaler.ini; re-assert ours
+    local ini
+    while IFS=$'\t' read -r _ ini _; do
+        case $ini in
+        */OptiScaler.ini) [ -f "$ini" ] && sed -i 's/^EnableDlssInputs *=.*/EnableDlssInputs = false/' "$ini" ;;
+        esac
+    done < <(grep -P '^replaced\t' "$(cat "$(state "$id")")/manifest")
     say "launching $NAME with $(basename "$proton")"
     say "log: $PFX/drive_c/windows/system32/ngx-fsr4.log"
     export STEAM_COMPAT_DATA_PATH="${PFX%/pfx}" STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM"

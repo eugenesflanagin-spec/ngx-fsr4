@@ -92,7 +92,9 @@ Many games only offer DLSS when they see an NVIDIA GPU. If Proton's
 spoofing is not enough (it wasn't for Boundary), use
 `ngx-fsr4 enable APPID --optiscaler-spoof`. This keeps OptiScaler for the
 spoofing but sets `EnableDlssInputs = false` in its ini, so DLSS calls go
-through to this DLL. You can then launch from Steam as usual.
+through to this DLL. Launch with `ngx-fsr4 run APPID`: launchers such as
+GOverlay's rewrite OptiScaler.ini at every start, and `run` re-applies the
+setting each time.
 
 Before changing anything, it records each change in a manifest under
 `~/.local/share/ngx-fsr4/backups/`. `disable` replays that manifest in
