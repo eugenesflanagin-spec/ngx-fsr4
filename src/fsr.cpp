@@ -43,7 +43,9 @@ bool load_ffx()
     if (GetEnvironmentVariableW(L"NGX_FSR4_FFX_DLL", path, MAX_PATH)) {
         ffx_dll = LoadLibraryW(path);
     } else {
-        static const wchar_t *const names[] = {L"amd_fidelityfx_upscaler_dx12.dll", L"amd_fidelityfx_dx12.dll"};
+        // a unique name first: a same-named DLL already loaded (e.g. by OptiScaler)
+        // would be returned instead of ours
+        static const wchar_t *const names[] = {L"ngx-fsr4-upscaler.dll", L"amd_fidelityfx_upscaler_dx12.dll", L"amd_fidelityfx_dx12.dll"};
         for (const wchar_t *name : names) {
             self_dir(path, MAX_PATH);
             wcsncat(path, name, MAX_PATH);

@@ -104,8 +104,10 @@ itself are left alone.
 
 ## The FSR 4 runtime
 
-Not included. Put AMD's `amd_fidelityfx_upscaler_dx12.dll` (FidelityFX
-SDK 2.x, with FSR 4) next to `nvngx.dll`, or point `NGX_FSR4_FFX_DLL` at it.
+Not included. Put AMD's `amd_fidelityfx_upscaler_dx12.dll` (FidelityFX SDK 2.x, with FSR 4)
+next to `nvngx.dll` as `ngx-fsr4-upscaler.dll` (the tool does this), or point
+`NGX_FSR4_FFX_DLL` at it. The unique name matters: another module of the same
+name already loaded in the game (OptiScaler's) would be used instead.
 `NGX_FSR4_VERSION=3.1` (any substring of a version name) picks a different
 version from the ones the DLL offers.
 
