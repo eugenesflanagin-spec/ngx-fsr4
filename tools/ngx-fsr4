@@ -273,7 +273,7 @@ cmd_run() {
     export DXVK_NVAPI_DRIVER_VERSION=${DXVK_NVAPI_DRIVER_VERSION:-58000}
     # appear as an RTX 4090 (the identity OptiScaler spoofs too)
     export DXVK_CONFIG="dxgi.hideAmdGpu=True;dxgi.customVendorId=10de;dxgi.customDeviceId=2684${DXVK_CONFIG:+;$DXVK_CONFIG}"
-    export PROTON_LOG=${PROTON_LOG:-1}
+    # Proton debug logging costs real frame time; opt in with PROTON_LOG=1
     cd "$(dirname "$exe")"
     exec python3 "$proton/proton" waitforexitandrun "$exe"
 }
