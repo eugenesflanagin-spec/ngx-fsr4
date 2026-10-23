@@ -5,8 +5,8 @@
 #   ngx-fsr4 enable APPID [--ffx PATH] [--optiscaler-spoof]
 #                                        install into the game's prefix;
 #                                        --optiscaler-spoof keeps OptiScaler for
-#                                        NVIDIA spoofing but sets
-#                                        EnableDlssInputs=false so DLSS reaches us
+#                                        NVIDIA spoofing but turns off all its
+#                                        input hooks so DLSS and FSR reach us
 #   ngx-fsr4 disable APPID               undo exactly what enable did
 #   ngx-fsr4 status [APPID]              what is enabled, where the backups are
 #   ngx-fsr4 run APPID [--proton DIR] [--exe PATH]
@@ -59,6 +59,21 @@ is_conflict() {
     nvapi64.dll) grep -a -q -i 'fakenvapi' "$f" ;;
     *) return 0 ;;
     esac
+}
+
+# OptiScaler stays for spoofing only: every input hook off, so neither the
+# game's DLSS calls nor our FidelityFX calls go through it
+PASSTHROUGH_KEYS=(EnableDlssInputs EnableXeSSInputs EnableFsr2Inputs UseFsr2Inputs
+    EnableFsr3Inputs UseFsr3Inputs EnableFfxInputs UseFfxInputs)
+optiscaler_passthrough() {
+    local ini=$1 k
+    for k in "${PASSTHROUGH_KEYS[@]}"; do
+        if grep -q "^$k *=" "$ini"; then
+            sed -i "s/^$k *=.*/$k = false/" "$ini"
+        else
+            sed -i "s/^\\[Inputs\\]/[Inputs]\\n$k = false/" "$ini"
+        fi
+    done
 }
 
 cmd_enable() {
@@ -129,11 +144,7 @@ cmd_enable() {
                 n=$((n + 1))
                 cp -a "$f" "$bk/files/$n"
                 printf 'replaced\t%s\t%s\t%s\n' "$f" "$bk/files/$n" "$(sha "$f")" >>"$man"
-                if grep -q '^EnableDlssInputs' "$f"; then
-                    sed -i 's/^EnableDlssInputs *=.*/EnableDlssInputs = false/' "$f"
-                else
-                    sed -i 's/^\[Inputs\]/[Inputs]\nEnableDlssInputs = false/' "$f"
-                fi
+                optiscaler_passthrough "$f"
             fi
             continue
         fi
@@ -172,7 +183,7 @@ open(path, "w", encoding="utf-8", errors="surrogateescape").write(text)
 PY
     say "enabled for $NAME"
     sed -n 's/^\(added\|replaced\|moved\)\t\([^\t]*\).*/  \1  \2/p' "$man"
-    [ $spoof = 1 ] && say "OptiScaler kept for spoofing (EnableDlssInputs=false); launch with: ngx-fsr4 run $id"
+    [ $spoof = 1 ] && say "OptiScaler kept for spoofing only (all its input hooks off); launch with: ngx-fsr4 run $id"
     say "backup: $bk"
     say "undo:   ngx-fsr4 disable $id"
 }
@@ -249,7 +260,7 @@ cmd_run() {
     local ini
     while IFS=$'\t' read -r _ ini _; do
         case $ini in
-        */OptiScaler.ini) [ -f "$ini" ] && sed -i 's/^EnableDlssInputs *=.*/EnableDlssInputs = false/' "$ini" ;;
+        */OptiScaler.ini) [ -f "$ini" ] && optiscaler_passthrough "$ini" ;;
         esac
     done < <(grep -P '^replaced\t' "$(cat "$(state "$id")")/manifest")
     say "launching $NAME with $(basename "$proton")"
