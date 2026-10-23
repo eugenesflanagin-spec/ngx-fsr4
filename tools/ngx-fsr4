@@ -124,10 +124,30 @@ cmd_enable() {
         done
     done < <(find "$GAME_DIR" -maxdepth 5 -type f -iname '*.exe' -printf '%h\0' | sort -zu)
 
-    # Proton writes this key by default; record it so the log can explain a miss
-    if ! grep -q -F '[Software\\NVIDIA Corporation\\Global\\NGXCore]' "$PFX/system.reg"; then
-        say "warning: NGXCore registry key missing; the game may not look in system32"
-    fi
+    # NVIDIA's loader only calls a signed _nvngx.dll unless signature checks are
+    # overridden in this prefix (the switch OptiScaler's EnableSignatureOverride.reg sets)
+    local reg="$PFX/system.reg"
+    pgrep -x wineserver >/dev/null && say "warning: a wineserver is running; it may rewrite system.reg on exit"
+    n=$((n + 1))
+    cp -a "$reg" "$bk/files/$n"
+    printf 'replaced\t%s\t%s\t%s\n' "$reg" "$bk/files/$n" "$(sha "$reg")" >>"$man"
+    python3 - "$reg" <<'PY'
+import sys, time
+path = sys.argv[1]
+text = open(path, encoding="utf-8", errors="surrogateescape").read()
+head = r"[Software\\NVIDIA Corporation\\Global\\NGXCore]"
+line = '"EnableSignatureOverride"=dword:00000001'
+i = text.find(head)
+if i < 0:
+    text = text.rstrip("\n") + "\n\n%s %d\n#time=0\n%s\n%s\n" % (
+        head, int(time.time()), r'"FullPath"="C:\\Windows\\System32"', line)
+else:
+    end = text.find("\n\n", i)
+    end = len(text) if end < 0 else end
+    if "EnableSignatureOverride" not in text[i:end]:
+        text = text[:end] + "\n" + line + text[end:]
+open(path, "w", encoding="utf-8", errors="surrogateescape").write(text)
+PY
     say "enabled for $NAME"
     sed -n 's/^\(added\|replaced\|moved\)\t\([^\t]*\).*/  \1  \2/p' "$man"
     [ $spoof = 1 ] && say "OptiScaler kept for spoofing (EnableDlssInputs=false); launch from Steam as usual"
