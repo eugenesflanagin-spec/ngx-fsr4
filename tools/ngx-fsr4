@@ -85,7 +85,7 @@ cmd_enable() {
     echo "$bk" >"$(state "$id")"
 
     local sys="$PFX/drive_c/windows/system32" n=0 dst src
-    for pair in "$LIB/nvngx.dll|_nvngx.dll" "$ffx|amd_fidelityfx_upscaler_dx12.dll"; do
+    for pair in "$LIB/nvngx.dll|_nvngx.dll" "$ffx|ngx-fsr4-upscaler.dll"; do
         src=${pair%%|*}
         dst="$sys/${pair##*|}"
         if [ -e "$dst" ]; then
@@ -112,6 +112,15 @@ cmd_enable() {
                 printf 'added\t%s\t-\t-\n' "$f" >>"$man"
             fi
             cp "$LIB/nvngx.dll" "$f"
+            f="$d/ngx-fsr4-upscaler.dll"
+            if [ -e "$f" ]; then
+                n=$((n + 1))
+                cp -a "$f" "$bk/files/$n"
+                printf 'replaced\t%s\t%s\t%s\n' "$f" "$bk/files/$n" "$(sha "$f")" >>"$man"
+            else
+                printf 'added\t%s\t-\t-\n' "$f" >>"$man"
+            fi
+            cp "$ffx" "$f"
         fi
         if [ $spoof = 1 ]; then
             # keep OptiScaler, but stop it answering DLSS itself
@@ -251,10 +260,9 @@ cmd_run() {
     export PROTON_FORCE_NVAPI=1 DXVK_NVAPI_ALLOW_OTHER_DRIVERS=1
     export DXVK_NVAPI_GPU_ARCH=${DXVK_NVAPI_GPU_ARCH:-AD100}
     export DXVK_NVAPI_DRIVER_VERSION=${DXVK_NVAPI_DRIVER_VERSION:-58000}
-    export DXVK_CONFIG="dxgi.hideAmdGpu=True${DXVK_CONFIG:+;$DXVK_CONFIG}"
+    # appear as an RTX 4090 (the identity OptiScaler spoofs too)
+    export DXVK_CONFIG="dxgi.hideAmdGpu=True;dxgi.customVendorId=10de;dxgi.customDeviceId=2684${DXVK_CONFIG:+;$DXVK_CONFIG}"
     export PROTON_LOG=${PROTON_LOG:-1}
-    # the game folder may hold another FSR build (OptiScaler's); use ours
-    export NGX_FSR4_FFX_DLL=${NGX_FSR4_FFX_DLL:-'C:\windows\system32\amd_fidelityfx_upscaler_dx12.dll'}
     cd "$(dirname "$exe")"
     exec python3 "$proton/proton" waitforexitandrun "$exe"
 }
