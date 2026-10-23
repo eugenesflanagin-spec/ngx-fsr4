@@ -1,0 +1,38 @@
+# Maintainer: Eugene Flanagin <eflanagin@pm.me>
+pkgname=ngx-fsr4-git
+pkgver=r1
+pkgrel=1
+pkgdesc="Experimental stand-in for NVIDIA's NGX runtime that answers DLSS Super Resolution with AMD FSR 4 (Proton)"
+arch=('any')
+url="https://github.com/eugenesflanagin-spec/ngx-fsr4"
+license=('MIT')
+depends=('bash' 'python')
+makedepends=('git' 'llvm-mingw')
+optdepends=('goverlay: provides an FSR 4.1.1 amd_fidelityfx_upscaler_dx12.dll')
+provides=('ngx-fsr4')
+conflicts=('ngx-fsr4')
+options=('!strip' '!lto' '!debug')
+source=("$pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$pkgname"
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+build() {
+    cd "$pkgname"
+    # Windows binaries: host CFLAGS/LDFLAGS do not apply
+    env -u CFLAGS -u CXXFLAGS -u LDFLAGS make LLVM_MINGW=/opt/llvm-mingw
+}
+
+package() {
+    cd "$pkgname"
+    install -Dm644 build/nvngx.dll "$pkgdir/usr/lib/ngx-fsr4/nvngx.dll"
+    install -Dm644 build/harness.exe "$pkgdir/usr/lib/ngx-fsr4/harness.exe"
+    install -Dm644 build/gpu.exe "$pkgdir/usr/lib/ngx-fsr4/gpu.exe"
+    install -Dm755 tools/ngx-fsr4 "$pkgdir/usr/bin/ngx-fsr4"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/ngx-fsr4/README.md"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 third_party/ffx/docs/license.md "$pkgdir/usr/share/licenses/$pkgname/FidelityFX-LICENSE.md"
+}

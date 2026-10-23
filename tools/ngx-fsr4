@@ -1,0 +1,214 @@
+#!/bin/bash
+# ngx-fsr4: put the DLSS→FSR 4 stand-in into one Steam game's Proton prefix,
+# with a manifest-driven backup so `disable` puts everything back.
+#
+#   ngx-fsr4 enable APPID [--ffx PATH]   install into the game's prefix
+#   ngx-fsr4 disable APPID               undo exactly what enable did
+#   ngx-fsr4 status [APPID]              what is enabled, where the backups are
+#   ngx-fsr4 run APPID [--proton DIR] [--exe PATH]
+#                                        launch outside Steam's launch options,
+#                                        with NVIDIA spoofing for the DLSS menu
+#   ngx-fsr4 log APPID                   follow the stand-in's log
+set -euo pipefail
+
+LIB=${NGX_FSR4_LIB:-/usr/lib/ngx-fsr4}
+DATA=${XDG_DATA_HOME:-$HOME/.local/share}/ngx-fsr4
+STEAM=${STEAM_ROOT:-$HOME/.local/share/Steam}
+DEFAULT_FFX=$HOME/.local/share/goverlay/FSR4/4.1.1b/amd_fidelityfx_upscaler_dx12.dll
+# OptiScaler / fakenvapi also answer DLSS calls; they are moved aside
+CONFLICTS=(dxgi.dll OptiScaler.ini OptiScaler.log fakenvapi.ini fakenvapi.log nvapi64.dll)
+
+die() { echo "ngx-fsr4: $*" >&2; exit 1; }
+say() { echo "ngx-fsr4: $*"; }
+
+libraries() {
+    echo "$STEAM/steamapps"
+    sed -n 's/^\s*"path"\s*"\(.*\)"/\1/p' "$STEAM/steamapps/libraryfolders.vdf" 2>/dev/null |
+        while read -r p; do echo "$p/steamapps"; done
+}
+
+# sets GAME_DIR, PFX, NAME for an app id
+find_game() {
+    local id=$1 lib acf
+    while IFS= read -r lib; do
+        acf="$lib/appmanifest_$id.acf"
+        [ -f "$acf" ] || continue
+        NAME=$(sed -n 's/^\s*"name"\s*"\(.*\)"/\1/p' "$acf" | head -1)
+        GAME_DIR="$lib/common/$(sed -n 's/^\s*"installdir"\s*"\(.*\)"/\1/p' "$acf" | head -1)"
+        PFX="$lib/compatdata/$id/pfx"
+        [ -d "$PFX/drive_c/windows/system32" ] || die "$NAME has no Proton prefix yet; launch it once from Steam first"
+        return 0
+    done < <(libraries | sort -u)
+    die "app $id is not installed in any Steam library"
+}
+
+running() { pgrep -f "AppId=$1( |\$)" >/dev/null 2>&1; }
+state() { echo "$DATA/enabled/$1"; }
+sha() { sha256sum "$1" | cut -d' ' -f1; }
+
+# OptiScaler's dxgi.dll / fakenvapi's nvapi64.dll only; never a game's own file
+is_conflict() {
+    local f=$1 base
+    base=$(basename "$f")
+    case "$base" in
+    dxgi.dll) grep -a -q -i 'OptiScaler' "$f" ;;
+    nvapi64.dll) grep -a -q -i 'fakenvapi' "$f" ;;
+    *) return 0 ;;
+    esac
+}
+
+cmd_enable() {
+    local id=$1 ffx=$DEFAULT_FFX
+    shift
+    while [ $# -gt 0 ]; do
+        case $1 in
+        --ffx) ffx=$2; shift 2 ;;
+        *) die "unknown option $1" ;;
+        esac
+    done
+    [ -f "$LIB/nvngx.dll" ] || die "$LIB/nvngx.dll missing (is the package installed?)"
+    [ -f "$ffx" ] || die "FSR runtime not found: $ffx (pass --ffx PATH to amd_fidelityfx_upscaler_dx12.dll)"
+    find_game "$id"
+    [ -e "$(state "$id")" ] && die "already enabled for $NAME (backup: $(cat "$(state "$id")")); run: ngx-fsr4 disable $id"
+    running "$id" && die "$NAME is running; quit it first"
+
+    local bk="$DATA/backups/$id-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$bk/files" "$DATA/enabled"
+    local man="$bk/manifest"
+    printf '# ngx-fsr4 backup for %s (%s)\n# kind\tpath\tbackup\tsha256\n' "$NAME" "$id" >"$man"
+    # record first, act second: an interrupted enable can still be undone
+    echo "$bk" >"$(state "$id")"
+
+    local sys="$PFX/drive_c/windows/system32" n=0 dst src
+    for pair in "$LIB/nvngx.dll|_nvngx.dll" "$ffx|amd_fidelityfx_upscaler_dx12.dll"; do
+        src=${pair%%|*}
+        dst="$sys/${pair##*|}"
+        if [ -e "$dst" ]; then
+            n=$((n + 1))
+            cp -a "$dst" "$bk/files/$n"
+            printf 'replaced\t%s\t%s\t%s\n' "$dst" "$bk/files/$n" "$(sha "$dst")" >>"$man"
+        else
+            printf 'added\t%s\t-\t-\n' "$dst" >>"$man"
+        fi
+        cp "$src" "$dst"
+    done
+
+    local d f
+    while IFS= read -r -d '' d; do
+        for f in "${CONFLICTS[@]}"; do
+            [ -f "$d/$f" ] || continue
+            is_conflict "$d/$f" || continue
+            n=$((n + 1))
+            printf 'moved\t%s\t%s\t%s\n' "$d/$f" "$bk/files/$n" "$(sha "$d/$f")" >>"$man"
+            mv "$d/$f" "$bk/files/$n"
+        done
+    done < <(find "$GAME_DIR" -maxdepth 5 -type f -iname '*.exe' -printf '%h\0' | sort -zu)
+
+    # Proton writes this key by default; record it so the log can explain a miss
+    if ! grep -q -F '[Software\\NVIDIA Corporation\\Global\\NGXCore]' "$PFX/system.reg"; then
+        say "warning: NGXCore registry key missing; the game may not look in system32"
+    fi
+    say "enabled for $NAME"
+    sed -n 's/^\(added\|replaced\|moved\)\t\([^\t]*\).*/  \1  \2/p' "$man"
+    say "backup: $bk"
+    say "undo:   ngx-fsr4 disable $id"
+}
+
+cmd_disable() {
+    local id=$1 bk man kind path backup hash bad=0
+    find_game "$id"
+    [ -e "$(state "$id")" ] || die "not enabled for $NAME"
+    running "$id" && die "$NAME is running; quit it first"
+    bk=$(cat "$(state "$id")")
+    man="$bk/manifest"
+    [ -f "$man" ] || die "manifest missing: $man"
+    # undo in reverse order
+    while IFS=$'\t' read -r kind path backup hash; do
+        case $kind in
+        added) rm -f "$path" ;;
+        replaced | moved)
+            if [ ! -f "$backup" ]; then
+                echo "  missing backup for $path" >&2
+                bad=1
+                continue
+            fi
+            if [ "$(sha "$backup")" != "$hash" ]; then
+                echo "  checksum mismatch for $backup" >&2
+                bad=1
+                continue
+            fi
+            if [ "$kind" = moved ]; then mv "$backup" "$path"; else cp -a "$backup" "$path"; fi
+            ;;
+        esac
+    done < <(grep -v '^#' "$man" | tac)
+    [ $bad = 0 ] || die "some files could not be restored; backup kept at $bk"
+    rm -f "$(state "$id")"
+    say "disabled for $NAME; everything put back (backup kept at $bk)"
+    say "note: GOverlay's launcher re-copies OptiScaler on its next launch anyway"
+}
+
+cmd_status() {
+    local f id
+    shopt -s nullglob
+    local any=0
+    for f in "$DATA"/enabled/*; do
+        id=$(basename "$f")
+        [ -n "${1:-}" ] && [ "$1" != "$id" ] && continue
+        any=1
+        find_game "$id"
+        echo "$id  $NAME  enabled  backup: $(cat "$f")"
+    done
+    [ $any = 1 ] || echo "not enabled for any game"
+}
+
+cmd_run() {
+    local id=$1 proton="" exe=""
+    shift
+    while [ $# -gt 0 ]; do
+        case $1 in
+        --proton) proton=$2; shift 2 ;;
+        --exe) exe=$2; shift 2 ;;
+        *) die "unknown option $1" ;;
+        esac
+    done
+    find_game "$id"
+    [ -e "$(state "$id")" ] || die "not enabled for $NAME; run: ngx-fsr4 enable $id"
+    if [ -z "$proton" ]; then
+        proton=$(ls -d "$STEAM"/compatibilitytools.d/proton_tkg_* 2>/dev/null | sort -V | tail -1)
+    fi
+    [ -x "$proton/proton" ] || die "no Proton found; pass --proton DIR"
+    if [ -z "$exe" ]; then
+        exe=$(find "$GAME_DIR" -maxdepth 1 -type f -iname '*.exe' | head -1)
+    fi
+    [ -f "$exe" ] || die "no game .exe found; pass --exe PATH"
+    pgrep -x steam >/dev/null || say "warning: Steam is not running; Steam games usually need it"
+    say "launching $NAME with $(basename "$proton")"
+    say "log: $PFX/drive_c/windows/system32/ngx-fsr4.log"
+    export STEAM_COMPAT_DATA_PATH="${PFX%/pfx}" STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM"
+    export SteamAppId=$id SteamGameId=$id
+    # make the game see an NVIDIA GPU so it offers DLSS
+    export PROTON_FORCE_NVAPI=1 DXVK_NVAPI_ALLOW_OTHER_DRIVERS=1
+    export DXVK_NVAPI_GPU_ARCH=${DXVK_NVAPI_GPU_ARCH:-AD100}
+    export DXVK_NVAPI_DRIVER_VERSION=${DXVK_NVAPI_DRIVER_VERSION:-58000}
+    export DXVK_CONFIG="dxgi.hideAmdGpu=True${DXVK_CONFIG:+;$DXVK_CONFIG}"
+    export PROTON_LOG=${PROTON_LOG:-1}
+    cd "$(dirname "$exe")"
+    exec python3 "$proton/proton" waitforexitandrun "$exe"
+}
+
+cmd_log() {
+    find_game "$1"
+    local log="$PFX/drive_c/windows/system32/ngx-fsr4.log"
+    [ -f "$log" ] || die "no log yet: $log"
+    exec tail -n 50 -F "$log"
+}
+
+[ $# -ge 1 ] || { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+cmd=$1
+shift
+case $cmd in
+enable | disable | run | log) [ $# -ge 1 ] || die "usage: ngx-fsr4 $cmd APPID"; "cmd_$cmd" "$@" ;;
+status) cmd_status "$@" ;;
+-h | --help | help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
+*) die "unknown command $cmd" ;;
+esac
