@@ -2,7 +2,11 @@
 # ngx-fsr4: put the DLSS→FSR 4 stand-in into one Steam game's Proton prefix,
 # with a manifest-driven backup so `disable` puts everything back.
 #
-#   ngx-fsr4 enable APPID [--ffx PATH]   install into the game's prefix
+#   ngx-fsr4 enable APPID [--ffx PATH] [--optiscaler-spoof]
+#                                        install into the game's prefix;
+#                                        --optiscaler-spoof keeps OptiScaler for
+#                                        NVIDIA spoofing but sets
+#                                        EnableDlssInputs=false so DLSS reaches us
 #   ngx-fsr4 disable APPID               undo exactly what enable did
 #   ngx-fsr4 status [APPID]              what is enabled, where the backups are
 #   ngx-fsr4 run APPID [--proton DIR] [--exe PATH]
@@ -58,11 +62,12 @@ is_conflict() {
 }
 
 cmd_enable() {
-    local id=$1 ffx=$DEFAULT_FFX
+    local id=$1 ffx=$DEFAULT_FFX spoof=0
     shift
     while [ $# -gt 0 ]; do
         case $1 in
         --ffx) ffx=$2; shift 2 ;;
+        --optiscaler-spoof) spoof=1; shift ;;
         *) die "unknown option $1" ;;
         esac
     done
@@ -95,6 +100,21 @@ cmd_enable() {
 
     local d f
     while IFS= read -r -d '' d; do
+        if [ $spoof = 1 ]; then
+            # keep OptiScaler, but stop it answering DLSS itself
+            f="$d/OptiScaler.ini"
+            if [ -f "$d/dxgi.dll" ] && is_conflict "$d/dxgi.dll" && [ -f "$f" ]; then
+                n=$((n + 1))
+                cp -a "$f" "$bk/files/$n"
+                printf 'replaced\t%s\t%s\t%s\n' "$f" "$bk/files/$n" "$(sha "$f")" >>"$man"
+                if grep -q '^EnableDlssInputs' "$f"; then
+                    sed -i 's/^EnableDlssInputs *=.*/EnableDlssInputs = false/' "$f"
+                else
+                    sed -i 's/^\[Inputs\]/[Inputs]\nEnableDlssInputs = false/' "$f"
+                fi
+            fi
+            continue
+        fi
         for f in "${CONFLICTS[@]}"; do
             [ -f "$d/$f" ] || continue
             is_conflict "$d/$f" || continue
@@ -110,6 +130,7 @@ cmd_enable() {
     fi
     say "enabled for $NAME"
     sed -n 's/^\(added\|replaced\|moved\)\t\([^\t]*\).*/  \1  \2/p' "$man"
+    [ $spoof = 1 ] && say "OptiScaler kept for spoofing (EnableDlssInputs=false); launch from Steam as usual"
     say "backup: $bk"
     say "undo:   ngx-fsr4 disable $id"
 }
@@ -203,12 +224,12 @@ cmd_log() {
     exec tail -n 50 -F "$log"
 }
 
-[ $# -ge 1 ] || { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+[ $# -ge 1 ] || { sed -n '2,/^set -e/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 cmd=$1
 shift
 case $cmd in
 enable | disable | run | log) [ $# -ge 1 ] || die "usage: ngx-fsr4 $cmd APPID"; "cmd_$cmd" "$@" ;;
 status) cmd_status "$@" ;;
--h | --help | help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
+-h | --help | help) sed -n '2,/^set -e/{/^#/p}' "$0" | sed 's/^# \{0,1\}//' ;;
 *) die "unknown command $cmd" ;;
 esac

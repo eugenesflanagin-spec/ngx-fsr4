@@ -85,6 +85,12 @@ ngx-fsr4 disable APPID    # put everything back
 - moves OptiScaler's `dxgi.dll` and fakenvapi's `nvapi64.dll` out of the
   game folder, because both also answer DLSS calls.
 
+Many games only offer DLSS when they see an NVIDIA GPU. If Proton's
+spoofing is not enough (it wasn't for Boundary), use
+`ngx-fsr4 enable APPID --optiscaler-spoof`. This keeps OptiScaler for the
+spoofing but sets `EnableDlssInputs = false` in its ini, so DLSS calls go
+through to this DLL. You can then launch from Steam as usual.
+
 Before changing anything, it records each change in a manifest under
 `~/.local/share/ngx-fsr4/backups/`. `disable` replays that manifest in
 reverse and checks each file's checksum. Files that belong to the game
