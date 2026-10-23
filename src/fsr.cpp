@@ -202,6 +202,10 @@ extern "C" int fsr_dispatch(void *handle, ID3D12GraphicsCommandList *cl, const s
     d.sharpness = e->sharpness;
 
     float dt = e->frame_ms;
+    // DLSS wants milliseconds, but some games (Boundary) pass seconds;
+    // nothing renders a frame in under 0.1 ms
+    if (dt > 0.0f && dt < 0.1f)
+        dt *= 1000.0f;
     LARGE_INTEGER now, freq;
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&freq);
