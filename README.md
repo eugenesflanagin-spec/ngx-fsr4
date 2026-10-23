@@ -60,6 +60,36 @@ make                      # or: make LLVM_MINGW=/path/to/llvm-mingw
 
 Output: `build/nvngx.dll`, `build/harness.exe`, `build/gpu.exe`.
 
+## Install (Arch)
+
+```sh
+cd packaging && makepkg -si      # builds from this repo; remove with: pacman -R ngx-fsr4-git
+```
+
+Installs `/usr/lib/ngx-fsr4/nvngx.dll` (plus the two test programs) and the
+`ngx-fsr4` command.
+
+## Use it in a game
+
+```sh
+ngx-fsr4 enable APPID [--ffx /path/to/amd_fidelityfx_upscaler_dx12.dll]
+ngx-fsr4 run APPID        # launches with NVIDIA spoofing so the game offers DLSS
+ngx-fsr4 log APPID        # follow the log
+ngx-fsr4 disable APPID    # put everything back
+```
+
+`enable` makes three kinds of change:
+
+- copies the DLL into the game's Proton prefix as `system32/_nvngx.dll`;
+- copies the FSR runtime beside it;
+- moves OptiScaler's `dxgi.dll` and fakenvapi's `nvapi64.dll` out of the
+  game folder, because both also answer DLSS calls.
+
+Before changing anything, it records each change in a manifest under
+`~/.local/share/ngx-fsr4/backups/`. `disable` replays that manifest in
+reverse and checks each file's checksum. Files that belong to the game
+itself are left alone.
+
 ## The FSR 4 runtime
 
 Not included. Put AMD's `amd_fidelityfx_upscaler_dx12.dll` (FidelityFX

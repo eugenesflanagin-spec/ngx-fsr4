@@ -655,6 +655,54 @@ API NVSDK_NGX_UpdateFeature(const void *app, int feature)
     return NGX_OK;
 }
 
+/* Newer loaders (Streamline's sl.common) look these up too. */
+API NVSDK_NGX_D3D12_Init_ProjectID(const char *project, int engine, const char *engine_ver, const wchar_t *path, ID3D12Device *dev, int ver, const void *info)
+{
+    return NVSDK_NGX_D3D12_Init_with_ProjectID(project, engine, engine_ver, path, dev, ver, info);
+}
+
+API NVSDK_NGX_D3D12_PopulateParameters_Impl(struct params *p)
+{
+    ngx_log("%s P%d", __func__, p ? p->id : -1);
+    if (!p)
+        return NGX_FAIL_INVALID_PARAMETER;
+    fill_caps(p);
+    return NGX_OK;
+}
+
+API NVSDK_NGX_D3D12_PopulateDeviceParameters_Impl(ID3D12Device *dev, struct params *p)
+{
+    ngx_log("%s device=%p P%d", __func__, (void *)dev, p ? p->id : -1);
+    if (!p)
+        return NGX_FAIL_INVALID_PARAMETER;
+    fill_caps(p);
+    return NGX_OK;
+}
+
+/* callbacks the caller registers: accept and ignore */
+#define ACCEPT(name) \
+    API name(void) { ngx_log("%s (ignored)", #name); return NGX_OK; }
+ACCEPT(NVSDK_NGX_SetInfoCallback)
+ACCEPT(NVSDK_NGX_SetOverrideStatusCallback)
+ACCEPT(NVSDK_NGX_SetTelemetryEvaluateCallback)
+
+/* signatures not in the public headers: decline rather than guess */
+#define DECLINE(name) \
+    API name(void) { ngx_log("%s -> not implemented", #name); return NGX_FAIL | 18; }
+DECLINE(NVSDK_NGX_GetAPIVersion)
+DECLINE(NVSDK_NGX_GetApplicationId)
+DECLINE(NVSDK_NGX_GetDriverVersion)
+DECLINE(NVSDK_NGX_GetDriverVersionEx)
+DECLINE(NVSDK_NGX_GetGPUArchitecture)
+DECLINE(NVSDK_NGX_GetSnippetVersion)
+DECLINE(NVSDK_NGX_ProcessCommand)
+DECLINE(NVSDK_NGX_D3D12_DLSSG_GetCurrentSettingsCallback_Impl)
+DECLINE(NVSDK_NGX_DirectSR_Init)
+DECLINE(NVSDK_NGX_DirectSR_Query)
+DECLINE(NVSDK_NGX_DirectSR_Create)
+DECLINE(NVSDK_NGX_DirectSR_Execute)
+DECLINE(NVSDK_NGX_DirectSR_Destroy)
+
 /* ---- exports: the C wrappers around the parameter object ---- */
 #define PEXP __declspec(dllexport) void __cdecl
 #define GEXP __declspec(dllexport) unsigned __cdecl
