@@ -20,7 +20,13 @@ pacman -Syu --noconfirm --needed "${extra[@]}" >/dev/null 2>&1 || bad "installin
 echo "=== install $(basename "$pkg")"
 pacman -U --noconfirm "$pkg" >/dev/null
 pacman -Q ngx-fsr4-git
-case $(pacman -Q ngx-fsr4-git | cut -d' ' -f2) in "$ver".r*) ok "package version starts with $ver" ;; *) bad "package version" ;; esac
+# a tagged build is VERSION.rN.gHASH (git describe); an untagged one 0.rN.HASH
+pv=$(pacman -Q ngx-fsr4-git | cut -d' ' -f2)
+case $pv in
+"$ver".r0.g*) ok "package version $pv" ;;
+0.r*) [ "${TAGGED:-false}" = true ] && bad "tagged build has untagged version $pv" || ok "untagged build: package version $pv" ;;
+*) bad "package version $pv" ;;
+esac
 for f in /usr/bin/ngx-fsr4 /usr/lib/ngx-fsr4/nvngx.dll /usr/lib/ngx-fsr4/harness.exe /usr/lib/ngx-fsr4/gpu.exe \
     /usr/share/doc/ngx-fsr4/README.md /usr/share/doc/ngx-fsr4/USER-GUIDE.md /usr/share/doc/ngx-fsr4/CHANGELOG.md \
     /usr/share/doc/ngx-fsr4/CREDITS.md /usr/share/licenses/ngx-fsr4-git/LICENSE /usr/share/licenses/ngx-fsr4-git/FidelityFX-LICENSE.md; do
