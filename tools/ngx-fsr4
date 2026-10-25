@@ -94,8 +94,65 @@ optiscaler_passthrough() {
     done
 }
 
+# reg_edit set|unset-value|unset-section SYSTEM.REG
+#   set: make sure NGXCore has EnableSignatureOverride=1; prints what it did:
+#        section (added the whole key), value (added the value), none (already set)
+#   unset-value / unset-section: remove exactly what "set" added, nothing else
+reg_edit() {
+    python3 - "$1" "$2" <<'PY'
+import re, sys, time
+mode, path = sys.argv[1], sys.argv[2]
+text = open(path, encoding="utf-8", errors="surrogateescape").read()
+head = r"[Software\\NVIDIA Corporation\\Global\\NGXCore]"
+line = '"EnableSignatureOverride"=dword:00000001'
+fullpath = r'"FullPath"="C:\\Windows\\System32"'
+
+def section():
+    """(start, end) of the NGXCore key block, end = index of the blank line after it"""
+    i = text.find(head)
+    if i < 0:
+        return None
+    end = text.find("\n\n", i)
+    return i, (len(text) if end < 0 else end)
+
+out = None
+sec = section()
+if mode == "set":
+    if sec is None:
+        text = text.rstrip("\n") + "\n\n%s %d\n#time=0\n%s\n%s\n" % (head, int(time.time()), fullpath, line)
+        out = "section"
+    elif "EnableSignatureOverride" not in text[sec[0]:sec[1]]:
+        text = text[:sec[1]] + "\n" + line + text[sec[1]:]
+        out = "value"
+    else:
+        out = "none"
+elif mode in ("unset-value", "unset-section"):
+    if sec is None:
+        out = "absent"
+    else:
+        i, end = sec
+        block = text[i:end]
+        lines = [l for l in block.split("\n") if l.strip() != line]
+        rest = [l for l in lines[1:] if l.strip() and not l.startswith("#")]
+        if mode == "unset-section" and all(l.strip() == fullpath for l in rest):
+            # only what "set" put there is left: drop the whole key and its blank line
+            pre = text[:i].rstrip("\n")
+            post = text[end:].lstrip("\n")
+            text = pre + ("\n\n" + post if post else "\n")
+            out = "removed-section"
+        else:
+            text = text[:i] + "\n".join(lines) + text[end:]
+            out = "removed-value"
+else:
+    sys.exit("reg_edit: bad mode " + mode)
+if out not in ("none", "absent"):
+    open(path, "w", encoding="utf-8", errors="surrogateescape").write(text)
+print(out)
+PY
+}
+
 cmd_enable() {
-    local id=$1 ffx=$DEFAULT_FFX spoof=0
+    local id=$1 ffx="" spoof=0
     shift
     while [ $# -gt 0 ]; do
         case $1 in
@@ -137,6 +194,8 @@ cmd_enable() {
         fi
         cp "$src" "$dst"
     done
+    # the DLL writes ngx-fsr4.log beside itself; disable moves it into the backup
+    printf 'log\t%s\t-\t-\n' "$sys/ngx-fsr4.log" >>"$man"
 
     local d f
     while IFS= read -r -d '' d; do
@@ -152,6 +211,7 @@ cmd_enable() {
                 printf 'added\t%s\t-\t-\n' "$f" >>"$man"
             fi
             cp "$LIB/nvngx.dll" "$f"
+            printf 'log\t%s\t-\t-\n' "$d/ngx-fsr4.log" >>"$man"
             f="$d/ngx-fsr4-upscaler.dll"
             if [ -e "$f" ]; then
                 n=$((n + 1))
@@ -184,40 +244,32 @@ cmd_enable() {
 
     # NVIDIA's loader only calls a signed _nvngx.dll unless signature checks are
     # overridden in this prefix (the switch OptiScaler's EnableSignatureOverride.reg sets)
-    local reg="$PFX/system.reg"
+    local reg="$PFX/system.reg" act
     pgrep -x wineserver >/dev/null && say "warning: a wineserver is running; it may rewrite system.reg on exit"
+    # a copy for manual recovery only; disable undoes just the value set here
     n=$((n + 1))
     cp -a "$reg" "$bk/files/$n"
-    printf 'replaced\t%s\t%s\t%s\n' "$reg" "$bk/files/$n" "$(sha "$reg")" >>"$man"
-    python3 - "$reg" <<'PY'
-import sys, time
-path = sys.argv[1]
-text = open(path, encoding="utf-8", errors="surrogateescape").read()
-head = r"[Software\\NVIDIA Corporation\\Global\\NGXCore]"
-line = '"EnableSignatureOverride"=dword:00000001'
-i = text.find(head)
-if i < 0:
-    text = text.rstrip("\n") + "\n\n%s %d\n#time=0\n%s\n%s\n" % (
-        head, int(time.time()), r'"FullPath"="C:\\Windows\\System32"', line)
-else:
-    end = text.find("\n\n", i)
-    end = len(text) if end < 0 else end
-    if "EnableSignatureOverride" not in text[i:end]:
-        text = text[:end] + "\n" + line + text[end:]
-open(path, "w", encoding="utf-8", errors="surrogateescape").write(text)
-PY
+    printf 'snapshot\t%s\t%s\t%s\n' "$reg" "$bk/files/$n" "$(sha "$reg")" >>"$man"
+    act=$(reg_edit set "$reg")
+    [ "$act" = none ] || printf 'regvalue\t%s\t%s\t-\n' "$reg" "$act" >>"$man"
     say "enabled for $NAME"
     sed -n 's/^\(added\|replaced\|moved\)\t\([^\t]*\).*/  \1  \2/p' "$man"
+    case $act in
+    section) say "  registry: added [NGXCore] with FullPath and EnableSignatureOverride=1" ;;
+    value) say "  registry: added EnableSignatureOverride=1 under NGXCore" ;;
+    none) say "  registry: EnableSignatureOverride already set, left as is" ;;
+    esac
     [ $spoof = 1 ] && say "OptiScaler kept for spoofing only (all its input hooks off); launch with: ngx-fsr4 run $id"
     say "backup: $bk"
     say "undo:   ngx-fsr4 disable $id"
 }
 
 cmd_disable() {
-    local id=$1 bk man kind path backup hash bad=0
+    local id=$1 bk man kind path backup hash bad=0 nlog=0
     find_game "$id"
     [ -e "$(state "$id")" ] || die "not enabled for $NAME"
     running "$id" && die "$NAME is running; quit it first"
+    pgrep -x wineserver >/dev/null && say "warning: a wineserver is running; it may rewrite system.reg on exit"
     bk=$(cat "$(state "$id")")
     man="$bk/manifest"
     [ -f "$man" ] || die "manifest missing: $man"
@@ -225,6 +277,23 @@ cmd_disable() {
     while IFS=$'\t' read -r kind path backup hash; do
         case $kind in
         added) rm -f "$path" ;;
+        log)
+            if [ -f "$path" ]; then
+                mkdir -p "$bk/logs"
+                nlog=$((nlog + 1))
+                mv "$path" "$bk/logs/$nlog-ngx-fsr4.log"
+                echo "  log moved to $bk/logs/$nlog-ngx-fsr4.log"
+            fi
+            ;;
+        regvalue)
+            # remove only the registry value enable added (older backups restore the whole file)
+            [ -f "$path" ] || continue
+            case $(reg_edit "unset-$backup" "$path") in
+            removed-section) echo "  registry: removed the NGXCore key enable had added" ;;
+            removed-value) echo "  registry: removed EnableSignatureOverride from NGXCore" ;;
+            esac
+            ;;
+        snapshot) ;;
         replaced | moved)
             if [ ! -f "$backup" ]; then
                 echo "  missing backup for $path" >&2
@@ -380,9 +449,23 @@ $(printf '  %s\n' "${exes[@]}")" ;;
 
 cmd_log() {
     find_game "$1"
-    local log="$PFX/drive_c/windows/system32/ngx-fsr4.log"
-    [ -f "$log" ] || die "no log yet: $log"
-    exec tail -n 50 -F "$log"
+    local logs=() f newest=""
+    # where enable put a DLL (from the manifest), plus system32 and anything in the game folder
+    if [ -e "$(state "$1")" ] && [ -f "$(cat "$(state "$1")")/manifest" ]; then
+        while IFS=$'\t' read -r _ f _; do logs+=("$f"); done < <(grep -P '^log\t' "$(cat "$(state "$1")")/manifest")
+    fi
+    logs+=("$PFX/drive_c/windows/system32/ngx-fsr4.log")
+    while IFS= read -r -d '' f; do logs+=("$f"); done < <(find "$GAME_DIR" -maxdepth 6 -type f -name ngx-fsr4.log -print0 2>/dev/null)
+    for f in "${logs[@]}"; do
+        [ -f "$f" ] || continue
+        if [ -z "$newest" ] || [ "$f" -nt "$newest" ]; then newest=$f; fi
+    done
+    [ -n "$newest" ] || die "no ngx-fsr4.log yet for $NAME (looked beside every DLL copy, in system32 and under $GAME_DIR); start the game first"
+    say "following $newest"
+    while IFS= read -r f; do
+        [ -f "$f" ] && [ "$f" != "$newest" ] && say "  (older log: $f)"
+    done < <(printf '%s\n' "${logs[@]}" | sort -u)
+    exec tail -n 50 -F "$newest"
 }
 
 [ $# -ge 1 ] || { sed -n '2,/^set -e/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
