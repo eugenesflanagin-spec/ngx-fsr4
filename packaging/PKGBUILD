@@ -1,14 +1,16 @@
 # Maintainer: Eugene Flanagin <eflanagin@pm.me>
+# Experimental: tested on one RX 9070 XT system, two games. Not affiliated with NVIDIA or AMD.
 pkgname=ngx-fsr4-git
-pkgver=r1
+pkgver=r10.73a17f8
 pkgrel=1
-pkgdesc="Experimental stand-in for NVIDIA's NGX runtime that answers DLSS Super Resolution with AMD FSR 4 (Proton)"
+pkgdesc="EXPERIMENTAL: stand-in for NVIDIA's NGX runtime that answers DLSS Super Resolution with AMD FSR 4 (Proton)"
 arch=('any')
 url="https://github.com/eugenesflanagin-spec/ngx-fsr4"
 license=('MIT')
 depends=('bash' 'python')
 makedepends=('git' 'llvm-mingw')
-optdepends=('goverlay: provides an FSR 4.1.1 amd_fidelityfx_upscaler_dx12.dll')
+optdepends=('goverlay: provides an FSR 4.1.1 amd_fidelityfx_upscaler_dx12.dll'
+            'steam: the games and Proton it works with')
 provides=('ngx-fsr4')
 conflicts=('ngx-fsr4')
 options=('!strip' '!lto' '!debug')

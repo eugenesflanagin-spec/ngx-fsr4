@@ -9,10 +9,13 @@ game's frame inputs (colour, depth, motion vectors, jitter and so on), and runs
 an FSR 4 upscale on the game's own command list through AMD's public
 FidelityFX API.
 
-> **Status: experiment.** Stage 3 is verified on a real GPU with a synthetic
-> test (below). It has **not yet been tried in a real game**. Frame
-> generation and ray reconstruction are refused for now, so games fall back
-> cleanly. For everyday use, [OptiScaler](https://github.com/optiscaler/OptiScaler)
+> **Status: experiment.** Verified on one system (RX 9070 XT, Proton-tkg,
+> FSR 4.1.1b): the synthetic GPU test below, and two real games' own DLSS
+> paths - *Boundary* (stable over a long session) and the *Black Myth: Wukong*
+> benchmark tool. In the Black Myth benchmark it ran slower than the game's
+> built-in FSR 4 option, so treat it as a compatibility route for DLSS-only
+> games, not a speed-up. Frame generation and ray reconstruction are refused
+> for now, so games fall back cleanly. For everyday use, [OptiScaler](https://github.com/optiscaler/OptiScaler)
 > is the mature project that does this and much more.
 
 ## How it works
@@ -146,8 +149,7 @@ Every call goes to `ngx-fsr4.log` next to the DLL, flushed line by line:
 
 ## Not done yet
 
-- Trying a real game. That needs the game to see an NVIDIA GPU (e.g. dxvk-nvapi
-  with GPU spoofing) and the NGX loader pointed at this DLL.
+- Testing on more games and GPUs (so far: two games, one RX 9070 XT).
 - Frame generation, ray reconstruction, D3D11 and Vulkan paths.
 - Reactive and transparency masks (DLSS's bias mask could map to FSR's reactive mask).
 
