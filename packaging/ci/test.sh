@@ -12,9 +12,11 @@ fails=0
 ok() { echo "ok   $*"; }
 bad() { echo "FAIL $*"; fails=$((fails + 1)); }
 
+# the archlinux image skips /usr/share/doc on install; allow it so the docs can be checked
+sed -i 's|usr/share/doc/\*||' /etc/pacman.conf
 extra=(binutils)
 [ "${WINE_TEST:-1}" = 1 ] && extra+=(wine)
-pacman -Syu --noconfirm --needed "${extra[@]}" >/dev/null
+pacman -Syu --noconfirm --needed "${extra[@]}" >/dev/null 2>&1 || bad "installing ${extra[*]}"
 echo "=== install $(basename "$pkg")"
 pacman -U --noconfirm "$pkg" >/dev/null
 pacman -Q ngx-fsr4-git
@@ -47,7 +49,8 @@ done
 [ "$(find "$d" -type f | wc -l)" = 11 ] && ok "tarball has exactly 11 files" || { bad "tarball file count"; find "$d" -type f; }
 [ "$("$d/tools/ngx-fsr4" --version)" = "ngx-fsr4 $ver" ] && ok "tarball helper --version" || bad "tarball --version"
 "$here/test/check-dll.sh" "$d/nvngx.dll" objdump || bad "tarball DLL check"
-if cmp -s "$d/nvngx.dll" /usr/lib/ngx-fsr4/nvngx.dll; then ok "tarball and package DLLs are byte-identical"; else echo "note tarball and package DLLs differ (separate builds)"; fi
+# two separate builds of the same commit: reproducible, so identical
+cmp -s "$d/nvngx.dll" /usr/lib/ngx-fsr4/nvngx.dll && ok "tarball and package DLLs are byte-identical" || bad "tarball and package DLLs differ"
 chown -R tester: "$t"
 su tester -c "NGX_FSR4_LIB='$d' '$here/test/tool-test.sh' '$d/tools/ngx-fsr4'" >/dev/null && ok "tool-test (tarball helper)" || bad "tool-test (tarball)"
 

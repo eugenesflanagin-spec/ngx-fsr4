@@ -4,7 +4,7 @@ CC      := $(LLVM_MINGW)/bin/x86_64-w64-mingw32-clang
 CXX     := $(LLVM_MINGW)/bin/x86_64-w64-mingw32-clang++
 VERSION := $(shell cat VERSION)
 CFLAGS  := -O2 -Wall -Wextra -Wno-unused-parameter -Isrc -DNGX_FSR4_VERSION='"$(VERSION)"'
-LDFLAGS := -static -s
+LDFLAGS := -static -s -Wl,--no-insert-timestamp
 DIST    := ngx-fsr4-$(VERSION)-proton
 
 all: build/nvngx.dll build/harness.exe build/gpu.exe
