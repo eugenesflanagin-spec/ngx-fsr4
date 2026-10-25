@@ -1,0 +1,46 @@
+ngx-fsr4 (EXPERIMENTAL) - prebuilt files for Linux + Proton
+==========================================================
+
+What this is: a stand-in for NVIDIA's NGX runtime (nvngx.dll) that answers a game's
+DLSS Super Resolution calls with AMD FSR 4, for AMD RDNA4 GPUs on Linux under
+Proton / vkd3d-proton. Experimental: tested on one RX 9070 XT system only.
+The full guide is USER-GUIDE.md; what changed is in CHANGELOG.md.
+
+Files
+  nvngx.dll        the stand-in (64-bit Windows DLL, built with llvm-mingw)
+  harness.exe      CPU-only self-test:  wine harness.exe nvngx.dll
+  gpu.exe          GPU self-test (needs Proton + the FSR 4 runtime DLL beside it)
+  tools/ngx-fsr4   helper that installs/removes it in one Steam game's Proton prefix
+  LICENSE          MIT (this project)
+  FidelityFX-LICENSE.md   AMD's MIT licence for the vendored FidelityFX API headers
+  CREDITS.md       every outside source and its licence
+
+NOT included: AMD's FSR 4 runtime (amd_fidelityfx_upscaler_dx12.dll, FidelityFX SDK 2.x).
+Get it yourself (for example GOverlay's FSR4 download, or AMD's SDK). ngx-fsr4 enable
+finds GOverlay's copy by itself; otherwise pass --ffx PATH.
+
+Needs: bash, python3, coreutils, findutils, procps (pgrep), Steam with Proton, an RDNA4 GPU.
+
+Use without installing (from this folder)
+  export NGX_FSR4_LIB="$PWD"        # where nvngx.dll is
+  ./tools/ngx-fsr4 enable APPID     # APPID = the game's Steam App ID; game must be closed
+  ./tools/ngx-fsr4 run APPID        # launch with NVIDIA GPU spoofing so DLSS is offered
+  ./tools/ngx-fsr4 log APPID        # follow the log (another terminal)
+  ./tools/ngx-fsr4 disable APPID    # undo everything enable did
+  ./tools/ngx-fsr4 --help           # all commands; "run APPID --dry-run" starts nothing
+
+Install system-wide (optional)
+  sudo install -Dm644 nvngx.dll harness.exe gpu.exe -t /usr/lib/ngx-fsr4/
+  sudo install -Dm755 tools/ngx-fsr4 /usr/local/bin/ngx-fsr4
+  (remove again: disable every game first, then delete those two places)
+
+What "enable" changes (all recorded in ~/.local/share/ngx-fsr4/backups/ and undone by
+"disable"): copies the DLL into the prefix (system32/_nvngx.dll) and next to the game
+(nvngx.dll), copies the FSR runtime as ngx-fsr4-upscaler.dll, sets NGXCore
+EnableSignatureOverride=1 in the prefix registry, and moves OptiScaler's dxgi.dll /
+fakenvapi's nvapi64.dll aside. Logs: ngx-fsr4.log beside the DLL copy that loaded
+(usually the game folder); "disable" moves them into the backup folder.
+
+Don't use it in online games with anti-cheat.
+
+Arch Linux: use ngx-fsr4-git-*.pkg.tar.zst from the release (sudo pacman -U ...).

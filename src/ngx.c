@@ -21,6 +21,10 @@
 
 #include "ngx_fsr4.h"
 
+#ifndef NGX_FSR4_VERSION
+#define NGX_FSR4_VERSION "dev"
+#endif
+
 static volatile LONG g_total_evals; /* Set/Get lines stop after a few frames */
 
 /* ---- result codes / constants (nvsdk_ngx_defs.h) ---- */
@@ -768,7 +772,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         log_open(inst);
         char exe[MAX_PATH];
         GetModuleFileNameA(NULL, exe, MAX_PATH);
-        ngx_log("=== ngx-fsr4 loaded into %s (pid %lu)", exe, GetCurrentProcessId());
+        ngx_log("=== ngx-fsr4 " NGX_FSR4_VERSION " loaded into %s (pid %lu)", exe, GetCurrentProcessId());
     } else if (reason == DLL_PROCESS_DETACH) {
         ngx_log("=== unloading");
         if (g_log)

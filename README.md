@@ -18,6 +18,9 @@ FidelityFX API.
 > for now, so games fall back cleanly. For everyday use, [OptiScaler](https://github.com/optiscaler/OptiScaler)
 > is the mature project that does this and much more.
 
+**Current version: 0.1.0** ([what changed](CHANGELOG.md)). Step-by-step instructions,
+every option and troubleshooting: **[docs/USER-GUIDE.md](docs/USER-GUIDE.md)**.
+
 ## How it works
 
 | Piece | What it does |
@@ -70,15 +73,27 @@ make                      # or: make LLVM_MINGW=/path/to/llvm-mingw
 ```
 
 Output: `build/nvngx.dll`, `build/harness.exe`, `build/gpu.exe`.
+`make check` runs the checks that need no GPU and no Wine (the DLL's exports, and
+the helper against a fake Steam library). `make dist` makes the release tarball.
 
-## Install (Arch)
+## Install
+
+Prebuilt files are on the [Releases page](https://github.com/eugenesflanagin-spec/ngx-fsr4/releases)
+(check them with `sha256sum -c SHA256SUMS --ignore-missing`):
+
+- **Arch Linux:** `sudo pacman -U ngx-fsr4-git-*-any.pkg.tar.zst`
+- **Any distribution:** `ngx-fsr4-<version>-proton.tar.gz`, use it in place; see `INSTALL.txt` inside.
+
+Or build the Arch package from this repo:
 
 ```sh
-cd packaging && makepkg -si      # builds from this repo; remove with: pacman -R ngx-fsr4-git
+cd packaging && makepkg -si      # needs llvm-mingw (AUR) installed first
 ```
 
-Installs `/usr/lib/ngx-fsr4/nvngx.dll` (plus the two test programs) and the
-`ngx-fsr4` command.
+Either way it installs `/usr/lib/ngx-fsr4/nvngx.dll` (plus the two test programs),
+the `ngx-fsr4` command and the docs in `/usr/share/doc/ngx-fsr4/`. Remove it with
+`ngx-fsr4 disable APPID` for each game in `ngx-fsr4 status`, then `pacman -R ngx-fsr4-git`.
+After an update, `disable` and `enable` each game again: `enable` copies the DLL.
 
 ## Use it in a game
 
@@ -174,7 +189,9 @@ sharp 1-px diagonal).
 
 ## Logging
 
-Every call goes to `ngx-fsr4.log` next to the DLL, flushed line by line:
+Every call goes to `ngx-fsr4.log` next to the copy of the DLL that loaded (usually
+the game folder, sometimes the prefix's `system32`), flushed line by line. The
+first line names the ngx-fsr4 version. `ngx-fsr4 log APPID` finds and follows the newest.
 
 - the first 3 frames in full, with each input's size and format;
 - after that, one line every 600 frames.
@@ -186,6 +203,20 @@ Every call goes to `ngx-fsr4.log` next to the DLL, flushed line by line:
 - Testing on more games and GPUs (so far: two games, one RX 9070 XT).
 - Frame generation, ray reconstruction, D3D11 and Vulkan paths.
 - Reactive and transparency masks (DLSS's bias mask could map to FSR's reactive mask).
+
+## Credits
+
+- AMD's FidelityFX API headers in `third_party/ffx` (MIT, unmodified) from the
+  [FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK).
+- NVIDIA's public NGX SDK headers ([NVIDIA/DLSS](https://github.com/NVIDIA/DLSS)) as the
+  interface reference; not redistributed.
+- Built with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw).
+- [OptiScaler](https://github.com/optiscaler/OptiScaler) for documenting the signature
+  override and camera defaults; [dxvk-nvapi](https://github.com/jp7677/dxvk-nvapi) and
+  [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton);
+  [GOverlay](https://github.com/benjamimgois/goverlay) for the FSR 4 runtime download.
+
+Details and licences: [CREDITS.md](CREDITS.md).
 
 ## Licence
 

@@ -1,0 +1,154 @@
+# Build, install-test and release ngx-fsr4.
+#
+# How it runs:
+#   * Push a tag like v0.1.0 -> builds, tests, and (only if every test passes)
+#     creates the GitHub release with the files attached. If a release for the
+#     tag was already published by hand, it is left alone.
+#   * "Run workflow" button (or: gh workflow run release.yml --ref BRANCH)
+#     -> same build and tests, no release: the files are kept as a
+#     downloadable "artifact" on the workflow run page for a few days.
+#
+# Each step calls a script in packaging/ci/ that you can also run on your own PC
+# inside docker (see the comments at the top of each script). The build runs in a
+# fresh archlinux:base-devel container, the install test in a fresh archlinux one.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# Jobs may only read the repository, except the final "release" job.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # 1. Check the version, build the DLL, the tarball and the Arch package.
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Install git
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0          # tags are needed for the package version
+          persist-credentials: false
+
+      - name: Read VERSION and check it against the tag
+        id: ver
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          git config --global --add safe.directory "$PWD"
+          VER=$(packaging/release-info.sh version)
+          echo "VERSION: $VER"
+          # On a tag push the tag must be exactly "v" + VERSION; stop here if not.
+          if [ "$REF_TYPE" = tag ]; then
+            packaging/release-info.sh check "$REF_NAME"
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch llvm-mingw (pinned, checksum-verified)
+        run: echo "LLVM_MINGW=$(packaging/ci/fetch-llvm-mingw.sh /opt/toolchain)" >> "$GITHUB_ENV"
+
+      - name: Build tarball and package
+        run: packaging/ci/build.sh . "$LLVM_MINGW" out
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: built
+          path: out/
+          if-no-files-found: error
+
+  # 2. Install the package in a FRESH container and test it (no GPU; Wine self-test).
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    env:
+      VER: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: built
+          path: built/
+      - name: Install-test
+        run: packaging/ci/test.sh built "$VER"
+
+  # 3. Collect the release files with SHA256SUMS and the release notes.
+  assemble:
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    env:
+      VER: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: built
+          path: release/
+      - name: SHA256SUMS and notes
+        run: |
+          (cd release && sha256sum -- * > SHA256SUMS)
+          # package + tarball + SHA256SUMS
+          n=$(find release -type f | wc -l); [ "$n" -eq 3 ] || { echo "::error::expected 3 release files, got $n"; ls -l release; exit 1; }
+          ls -l release; cat release/SHA256SUMS
+          packaging/release-info.sh notes "v$VER" > release-notes.md
+          packaging/release-info.sh title "v$VER" > release-title.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: |
+            release/
+            release-notes.md
+            release-title.txt
+          if-no-files-found: error
+
+  # 4. Create the GitHub release. Only for tag pushes, only after every test passed.
+  release:
+    if: github.ref_type == 'tag'
+    needs: assemble
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to create the release and upload files
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: .
+      - name: Create the release
+        run: |
+          ls -l release
+          if state=$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null); then
+            if [ "$state" = true ]; then
+              echo "Draft release $TAG exists: uploading the files again and publishing it"
+              gh release upload "$TAG" release/* --clobber
+              gh release edit "$TAG" --title "$(cat release-title.txt)" --notes-file release-notes.md --draft=false
+            else
+              # published already (e.g. by hand): don't replace files people may have downloaded
+              echo "::notice::release $TAG is already published; leaving it unchanged"
+            fi
+          else
+            gh release create "$TAG" release/* --verify-tag \
+              --title "$(cat release-title.txt)" --notes-file release-notes.md
+          fi
+          gh release view "$TAG" --json url,assets -q '.url, (.assets[] | .name)'

@@ -15,10 +15,13 @@
 #                                        --dry-run prints what would run
 #   ngx-fsr4 log APPID                   follow the newest stand-in log (beside
 #                                        whichever copy of the DLL was loaded)
+#   ngx-fsr4 --version                   print the version
 #
 # Environment: NGX_FSR4_FFX (FSR runtime DLL for enable), NGX_FSR4_PROTON (Proton
 # directory for run), STEAM_ROOT, NGX_FSR4_LIB.
 set -euo pipefail
+
+VERSION=0.1.0
 
 LIB=${NGX_FSR4_LIB:-/usr/lib/ngx-fsr4}
 DATA=${XDG_DATA_HOME:-$HOME/.local/share}/ngx-fsr4
@@ -108,12 +111,13 @@ line = '"EnableSignatureOverride"=dword:00000001'
 fullpath = r'"FullPath"="C:\\Windows\\System32"'
 
 def section():
-    """(start, end) of the NGXCore key block, end = index of the blank line after it"""
+    """(start, end) of the NGXCore key block; end = index of the newline that ends
+    its last line (the blank line after it, or the end of the file)"""
     i = text.find(head)
     if i < 0:
         return None
     end = text.find("\n\n", i)
-    return i, (len(text) if end < 0 else end)
+    return i, (len(text.rstrip("\n")) if end < 0 else end)
 
 out = None
 sec = section()
@@ -474,6 +478,7 @@ shift
 case $cmd in
 enable | disable | run | log) [ $# -ge 1 ] || die "usage: ngx-fsr4 $cmd APPID"; "cmd_$cmd" "$@" ;;
 status) cmd_status "$@" ;;
+-V | --version | version) echo "ngx-fsr4 $VERSION" ;;
 -h | --help | help) sed -n '2,/^set -e/{/^#/p}' "$0" | sed 's/^# \{0,1\}//' ;;
 *) die "unknown command $cmd" ;;
 esac
