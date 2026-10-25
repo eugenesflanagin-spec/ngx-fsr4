@@ -9,16 +9,21 @@
 #                                        input hooks so DLSS and FSR reach us
 #   ngx-fsr4 disable APPID               undo exactly what enable did
 #   ngx-fsr4 status [APPID]              what is enabled, where the backups are
-#   ngx-fsr4 run APPID [--proton DIR] [--exe PATH]
+#   ngx-fsr4 run APPID [--proton DIR] [--exe PATH] [--dry-run]
 #                                        launch outside Steam's launch options,
-#                                        with NVIDIA spoofing for the DLSS menu
-#   ngx-fsr4 log APPID                   follow the stand-in's log
+#                                        with NVIDIA spoofing for the DLSS menu;
+#                                        --dry-run prints what would run
+#   ngx-fsr4 log APPID                   follow the newest stand-in log (beside
+#                                        whichever copy of the DLL was loaded)
+#
+# Environment: NGX_FSR4_FFX (FSR runtime DLL for enable), NGX_FSR4_PROTON (Proton
+# directory for run), STEAM_ROOT, NGX_FSR4_LIB.
 set -euo pipefail
 
 LIB=${NGX_FSR4_LIB:-/usr/lib/ngx-fsr4}
 DATA=${XDG_DATA_HOME:-$HOME/.local/share}/ngx-fsr4
 STEAM=${STEAM_ROOT:-$HOME/.local/share/Steam}
-DEFAULT_FFX=$HOME/.local/share/goverlay/FSR4/4.1.1b/amd_fidelityfx_upscaler_dx12.dll
+FFX_NAME=amd_fidelityfx_upscaler_dx12.dll
 # OptiScaler / fakenvapi also answer DLSS calls; they are moved aside
 CONFLICTS=(dxgi.dll OptiScaler.ini OptiScaler.log fakenvapi.ini fakenvapi.log nvapi64.dll)
 
@@ -44,6 +49,19 @@ find_game() {
         return 0
     done < <(libraries | sort -u)
     die "app $id is not installed in any Steam library"
+}
+
+# FSR 4 runtime: --ffx, else $NGX_FSR4_FFX, else the newest copy in the places it is
+# usually found (our data dir, GOverlay's FSR4 downloads, the package's lib dir)
+find_ffx() {
+    local c
+    if [ -n "${NGX_FSR4_FFX:-}" ]; then echo "$NGX_FSR4_FFX"; return 0; fi
+    for c in "$DATA/$FFX_NAME" "$LIB/$FFX_NAME"; do
+        [ -f "$c" ] && { echo "$c"; return 0; }
+    done
+    c=$(ls -1d "${XDG_DATA_HOME:-$HOME/.local/share}"/goverlay/FSR4/*/"$FFX_NAME" 2>/dev/null | sort -V | tail -1)
+    [ -n "$c" ] && { echo "$c"; return 0; }
+    return 1
 }
 
 running() { pgrep -f "AppId=$1( |\$)" >/dev/null 2>&1; }
@@ -87,7 +105,14 @@ cmd_enable() {
         esac
     done
     [ -f "$LIB/nvngx.dll" ] || die "$LIB/nvngx.dll missing (is the package installed?)"
-    [ -f "$ffx" ] || die "FSR runtime not found: $ffx (pass --ffx PATH to amd_fidelityfx_upscaler_dx12.dll)"
+    if [ -z "$ffx" ]; then
+        ffx=$(find_ffx) || die "FSR 4 runtime ($FFX_NAME) not found. It is not shipped with ngx-fsr4;
+  get it from AMD's FidelityFX SDK 2.x or a tool that downloads it (GOverlay keeps copies in
+  ~/.local/share/goverlay/FSR4/<version>/), then either pass --ffx PATH, set NGX_FSR4_FFX=PATH,
+  or copy it to $DATA/$FFX_NAME"
+    fi
+    [ -f "$ffx" ] || die "FSR runtime not found: $ffx (pass --ffx PATH to $FFX_NAME)"
+    say "FSR runtime: $ffx"
     find_game "$id"
     [ -e "$(state "$id")" ] && die "already enabled for $NAME (backup: $(cat "$(state "$id")")); run: ngx-fsr4 disable $id"
     running "$id" && die "$NAME is running; quit it first"
@@ -235,26 +260,101 @@ cmd_status() {
     [ $any = 1 ] || echo "not enabled for any game"
 }
 
+# Proton for an app: Steam's own choice for this game (CompatToolMapping in
+# config.vdf, then the global default), resolved to a directory with a "proton" script
+steam_compat_tool() {
+    python3 - "$STEAM" "$1" <<'PY'
+import os, re, sys, glob
+steam, app = sys.argv[1], sys.argv[2]
+try:
+    cfg = open(os.path.join(steam, "config", "config.vdf"), errors="replace").read()
+except OSError:
+    sys.exit(1)
+i = cfg.find('"CompatToolMapping"')
+if i < 0:
+    sys.exit(1)
+seg = cfg[i:]
+def mapped(a):
+    m = re.search(r'\n\s*"%s"\s*\{\s*"name"\s*"([^"]*)"' % re.escape(a), seg)
+    return m.group(1) if m and m.group(1) else None
+names = [n for n in (mapped(app), mapped("0")) if n]
+tools = {}
+for vdf in glob.glob(os.path.join(steam, "compatibilitytools.d", "*", "compatibilitytool.vdf")):
+    m = re.search(r'"compat_tools"\s*\{\s*"([^"]+)"', open(vdf, errors="replace").read())
+    if m:
+        tools[m.group(1)] = os.path.dirname(vdf)
+for n in names:
+    d = tools.get(n) or os.path.join(steam, "compatibilitytools.d", n)
+    if os.access(os.path.join(d, "proton"), os.X_OK):
+        print(d)
+        sys.exit(0)
+sys.exit(1)
+PY
+}
+
+# every Proton build Steam can see: compatibilitytools.d and steamapps/common/Proton*
+all_protons() {
+    local lib d
+    for d in "$STEAM"/compatibilitytools.d/*/; do
+        [ -x "$d/proton" ] && echo "${d%/}"
+    done
+    while IFS= read -r lib; do
+        for d in "$lib"/common/Proton*/; do
+            [ -x "$d/proton" ] && echo "${d%/}"
+        done
+    done < <(libraries | sort -u)
+    return 0
+}
+
 cmd_run() {
-    local id=$1 proton="" exe=""
+    local id=$1 proton="${NGX_FSR4_PROTON:-}" exe="" dry=0 how="NGX_FSR4_PROTON"
     shift
     while [ $# -gt 0 ]; do
         case $1 in
-        --proton) proton=$2; shift 2 ;;
+        --proton) proton=$2; how="--proton"; shift 2 ;;
         --exe) exe=$2; shift 2 ;;
+        --dry-run | -n) dry=1; shift ;;
         *) die "unknown option $1" ;;
         esac
     done
     find_game "$id"
-    [ -e "$(state "$id")" ] || die "not enabled for $NAME; run: ngx-fsr4 enable $id"
+    [ -e "$(state "$id")" ] || [ $dry = 1 ] || die "not enabled for $NAME; run: ngx-fsr4 enable $id"
     if [ -z "$proton" ]; then
-        proton=$(ls -d "$STEAM"/compatibilitytools.d/proton_tkg_* 2>/dev/null | sort -V | tail -1)
+        if proton=$(steam_compat_tool "$id"); then
+            how="Steam's compatibility tool setting"
+        else
+            local found
+            mapfile -t found < <(all_protons | sort -u)
+            case ${#found[@]} in
+            0) die "no Proton found in $STEAM/compatibilitytools.d or steamapps/common; pass --proton DIR" ;;
+            1) proton=${found[0]}; how="the only Proton installed" ;;
+            *) die "several Proton builds found and Steam names none for this game; pick one with --proton DIR (or NGX_FSR4_PROTON):
+$(printf '  %s\n' "${found[@]}")" ;;
+            esac
+        fi
     fi
-    [ -x "$proton/proton" ] || die "no Proton found; pass --proton DIR"
+    [ -x "$proton/proton" ] || die "not a Proton directory (no executable 'proton' in it): $proton"
     if [ -z "$exe" ]; then
-        exe=$(find "$GAME_DIR" -maxdepth 1 -type f -iname '*.exe' | head -1)
+        local exes
+        # top-level .exe files, minus the usual helpers
+        mapfile -t exes < <(find "$GAME_DIR" -maxdepth 1 -type f -iname '*.exe' \
+            ! -iname 'unins*' ! -iname '*setup*' ! -iname '*redist*' ! -iname '*crash*' \
+            ! -iname 'easyanticheat*' ! -iname '*uninstall*' | sort)
+        case ${#exes[@]} in
+        0) die "no game .exe in $GAME_DIR; pass --exe PATH" ;;
+        1) exe=${exes[0]} ;;
+        *) die "several .exe files in $GAME_DIR; pass --exe PATH:
+$(printf '  %s\n' "${exes[@]}")" ;;
+        esac
     fi
-    [ -f "$exe" ] || die "no game .exe found; pass --exe PATH"
+    [ -f "$exe" ] || die "game executable not found: $exe"
+    if [ $dry = 1 ]; then
+        say "would launch $NAME"
+        say "  proton: $proton ($how)"
+        say "  exe:    $exe"
+        [ -e "$(state "$id")" ] || say "  (not enabled yet: run ngx-fsr4 enable $id first)"
+        return 0
+    fi
     pgrep -x steam >/dev/null || say "warning: Steam is not running; Steam games usually need it"
     # launchers such as GOverlay's bgmod rewrite OptiScaler.ini; re-assert ours
     local ini
@@ -263,8 +363,8 @@ cmd_run() {
         */OptiScaler.ini) [ -f "$ini" ] && optiscaler_passthrough "$ini" ;;
         esac
     done < <(grep -P '^replaced\t' "$(cat "$(state "$id")")/manifest")
-    say "launching $NAME with $(basename "$proton")"
-    say "log: $PFX/drive_c/windows/system32/ngx-fsr4.log"
+    say "launching $NAME with $(basename "$proton") ($how)"
+    say "log: ngx-fsr4 log $id"
     export STEAM_COMPAT_DATA_PATH="${PFX%/pfx}" STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM"
     export SteamAppId=$id SteamGameId=$id
     # make the game see an NVIDIA GPU so it offers DLSS
