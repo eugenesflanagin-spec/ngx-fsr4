@@ -53,6 +53,14 @@ DLSS gives no camera data, so near, far and FOV use defaults. You can
 override them with `NGX_FSR4_NEAR`, `NGX_FSR4_FAR` and `NGX_FSR4_FOV`
 (radians).
 
+The jitter offset is passed through unchanged by default. If a game's image
+shimmers or smears in a way that looks like the jitter is applied the wrong way
+round, `NGX_FSR4_JITTER_SIGN=-1` flips its sign (the value multiplies both jitter
+components; default `1`).
+
+All of these are read from the game's environment, so set them for the launch,
+e.g. `NGX_FSR4_JITTER_SIGN=-1 ngx-fsr4 run APPID`.
+
 ## Build
 
 Needs [llvm-mingw](https://github.com/mstorsjo/llvm-mingw):
@@ -76,12 +84,32 @@ Installs `/usr/lib/ngx-fsr4/nvngx.dll` (plus the two test programs) and the
 
 ```sh
 ngx-fsr4 enable APPID [--ffx /path/to/amd_fidelityfx_upscaler_dx12.dll]
-ngx-fsr4 run APPID        # launches with NVIDIA spoofing so the game offers DLSS
-ngx-fsr4 log APPID        # follow the log
+ngx-fsr4 run APPID [--proton DIR] [--exe PATH] [--dry-run]
+                          # launches with NVIDIA spoofing so the game offers DLSS
+ngx-fsr4 log APPID        # follow the newest log
 ngx-fsr4 disable APPID    # put everything back
 ```
 
-`enable` makes three kinds of change:
+`enable` finds the FSR runtime in this order: `--ffx PATH`, `$NGX_FSR4_FFX`,
+`~/.local/share/ngx-fsr4/amd_fidelityfx_upscaler_dx12.dll`,
+`/usr/lib/ngx-fsr4/amd_fidelityfx_upscaler_dx12.dll`, then the newest version
+folder under `~/.local/share/goverlay/FSR4/`. If none exists it stops and says
+where to put the file.
+
+`run` picks Proton in this order: `--proton DIR`, `$NGX_FSR4_PROTON`, the
+compatibility tool Steam is set to use for this game (or Steam's global default),
+then the only Proton build installed (`compatibilitytools.d/*` or
+`steamapps/common/Proton*`). With several builds and no Steam setting it lists
+them and asks for `--proton`. The game executable is the one `.exe` in the game
+folder (crash handlers, setup and uninstall programs ignored); if there are
+several, it lists them and asks for `--exe`. `--dry-run` prints the Proton and
+executable it would use and launches nothing.
+
+`log` follows the newest `ngx-fsr4.log`: the DLL writes it beside whichever copy
+was loaded (the game folder or the prefix's `system32`), so it checks every place
+`enable` put a copy, plus `system32` and the game folder.
+
+`enable` makes four kinds of change:
 
 - copies the DLL into the game's Proton prefix as `system32/_nvngx.dll`, and beside the
   game as `nvngx.dll` (the NGX loader checks there first);
@@ -104,7 +132,13 @@ setting each time.
 Before changing anything, it records each change in a manifest under
 `~/.local/share/ngx-fsr4/backups/`. `disable` replays that manifest in
 reverse and checks each file's checksum. Files that belong to the game
-itself are left alone.
+itself are left alone. In the registry, `disable` removes only the value
+`enable` added (and the `NGXCore` key itself if `enable` created it and nothing
+else was added since); the rest of `system.reg` is not touched. A copy of
+`system.reg` from before `enable` stays in the backup folder for manual
+recovery. The `ngx-fsr4.log` files beside each DLL copy are moved into the backup
+folder (`logs/`). Backups made by older versions restored the whole `system.reg`
+file; `disable` still does that for them.
 
 ## The FSR 4 runtime
 
