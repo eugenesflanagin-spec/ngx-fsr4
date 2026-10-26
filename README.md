@@ -81,6 +81,7 @@ the helper against a fake Steam library). `make dist` makes the release tarball.
 Prebuilt files are on the [Releases page](https://github.com/eugenesflanagin-spec/ngx-fsr4/releases)
 (check them with `sha256sum -c SHA256SUMS --ignore-missing`):
 
+- **AUR:** [`ngx-fsr4`](https://aur.archlinux.org/packages/ngx-fsr4) (`yay -S ngx-fsr4`; builds the release tag, needs any llvm-mingw from the AUR)
 - **Arch Linux:** `sudo pacman -U ngx-fsr4-git-*-any.pkg.tar.zst`
 - **Any distribution:** `ngx-fsr4-<version>-proton.tar.gz`, use it in place; see `INSTALL.txt` inside.
 
@@ -92,7 +93,7 @@ cd packaging && makepkg -si      # needs llvm-mingw (AUR) installed first
 
 Either way it installs `/usr/lib/ngx-fsr4/nvngx.dll` (plus the two test programs),
 the `ngx-fsr4` command and the docs in `/usr/share/doc/ngx-fsr4/`. Remove it with
-`ngx-fsr4 disable APPID` for each game in `ngx-fsr4 status`, then `pacman -R ngx-fsr4-git`.
+`ngx-fsr4 disable APPID` for each game in `ngx-fsr4 status`, then `pacman -R ngx-fsr4` (or `ngx-fsr4-git`).
 After an update, `disable` and `enable` each game again: `enable` copies the DLL.
 
 ## Use it in a game

@@ -72,7 +72,10 @@ Tested on: Radeon RX 9070 XT, proton-tkg (Wine 11), FSR 4.1.1b, Arch Linux, kern
 sudo pacman -U ngx-fsr4-git-*-any.pkg.tar.zst
 ```
 
-**From source:** the repository includes a PKGBUILD. It is not on the AUR; build it yourself:
+**AUR:** [`ngx-fsr4`](https://aur.archlinux.org/packages/ngx-fsr4) builds the release tag: `yay -S ngx-fsr4`
+(pick any llvm-mingw when asked; `llvm-mingw-w64-toolchain-ucrt-bin` is the quickest).
+
+**From source:** the repository also includes a `-git` PKGBUILD; build it yourself:
 
 ```sh
 git clone https://github.com/eugenesflanagin-spec/ngx-fsr4.git
@@ -460,7 +463,7 @@ After updating, **re-run `enable`** for each game (`disable` then `enable`), bec
 ## 12. Uninstall
 
 1. For every game listed by `ngx-fsr4 status`: `ngx-fsr4 disable APPID`.
-2. `sudo pacman -R ngx-fsr4-git`.
+2. `sudo pacman -R ngx-fsr4` (or `ngx-fsr4-git`, whichever you installed).
 3. Optional: `rm -rf ~/.local/share/ngx-fsr4` (old backups and state).
 4. Logs: `disable` moves the `ngx-fsr4.log` files into the backup folder, so step 3 removes
    them too. (Games enabled with an older version have no log entries in their manifest;
